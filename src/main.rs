@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate prettytable;
 use std::error::Error;
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -7,12 +9,47 @@ use depchk::{DependencyFileParser, DependencyMismatchResult, VersionMismatch};
 
 use reqwest::Client;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+use prettytable::Table;
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Checks a given package.json file for dependency update availability
+    Npm(NpmArgs),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum OutputTypes {
+    Table,
+    Json,
+}
 
 #[derive(Debug)]
 struct DependencyCheckErrors {
     errors: Vec<Box<dyn Error>>,
     msg: String,
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Args, Debug, Default)]
+struct NpmArgs {
+    /// If true, also checks the dev dependencies for updates
+    #[arg(short, long)]
+    dev: bool,
+
+    /// Path to the `package.json` file. If not given, assumes that it is in the current directory
+    file: Option<PathBuf>,
+    // TODO: Add support for multiple outputs
+    // #[arg(value_enum, short, long)]
+    // output: OutputTypes,
 }
 
 impl DependencyCheckErrors {
@@ -42,28 +79,6 @@ impl Error for DependencyCheckErrors {
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Checks a given package.json file for dependency update availability
-    Npm(NpmArgs),
-}
-
-#[derive(Args, Debug)]
-struct NpmArgs {
-    #[arg(short = 'd', long)]
-    include_dev_dependencies: bool,
-
-    file: Option<PathBuf>,
-}
-
 fn handle_dependency_result(
     results: Vec<DependencyMismatchResult>,
 ) -> (Vec<VersionMismatch>, DependencyCheckErrors) {
@@ -76,21 +91,24 @@ fn handle_dependency_result(
 }
 
 fn print_mismatches(mismatches: &[VersionMismatch]) {
+    let mut table = Table::new();
+
+    table.set_titles(row![b->"Package Name", b->"Version Constraint", b->"Latest Version"]);
+
     for mismatch in mismatches {
         let (name, constraint, version) = mismatch.destruct();
 
-        println!(
-            "\tPackage '{}' has latest version {} which is not satisfied by {}",
-            name, version, constraint,
-        );
+        table.add_row(row![FG->name, FB->constraint, FR->version]);
     }
+
+    table.printstd();
 }
 
 async fn check_npm(path: PathBuf, include_dev_dependencies: bool) -> Result<(), Box<dyn Error>> {
     let package_json = path.to_str().unwrap();
-    let client = Client::builder().build()?;
 
-    let dependencies = PackageJson::parse_file(package_json);
+    let dependencies = PackageJson::parse_file(package_json)?;
+    let client = Client::builder().build()?;
 
     let (mismatches, mut err) =
         handle_dependency_result(dependencies.check_dependencies(&client).await);
@@ -129,15 +147,14 @@ async fn check_npm(path: PathBuf, include_dev_dependencies: bool) -> Result<(), 
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    if cli.command.is_none() {
-        return Ok(());
-    }
-
-    let result = match cli.command.unwrap() {
+    let result = match cli
+        .command
+        .unwrap_or_else(|| Commands::Npm(NpmArgs::default()))
+    {
         Commands::Npm(args) => {
             check_npm(
                 args.file.unwrap_or_else(|| PathBuf::from("package.json")),
-                args.include_dev_dependencies,
+                args.dev,
             )
             .await
         }

@@ -23,7 +23,7 @@ pub trait Dependency {
 pub trait DependencyFileParser {
     type Output: Dependency;
 
-    fn parse_file(file_name: &str) -> ProjectDependencies<Self::Output>;
+    fn parse_file(file_name: &str) -> Result<ProjectDependencies<Self::Output>, Box<dyn Error>>;
 }
 
 pub struct ProjectDependencies<T: Dependency> {
@@ -41,6 +41,10 @@ pub struct VersionMismatch {
 impl VersionMismatch {
     pub fn destruct(&self) -> (&str, &str, &str) {
         (&self.name, &self.constraint, &self.version)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 

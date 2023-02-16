@@ -2,6 +2,7 @@ use crate::{
     Dependency, DependencyCheckResult, DependencyFileParser, ProjectDependencies, VersionMismatch,
 };
 
+use std::error::Error;
 use std::{collections::HashMap, fs};
 
 use async_trait::async_trait;
@@ -136,12 +137,12 @@ impl From<PackageJsonRaw> for PackageJson {
 impl DependencyFileParser for PackageJson {
     type Output = NpmDependency;
 
-    fn parse_file(file_name: &str) -> ProjectDependencies<Self::Output> {
-        let file = fs::read_to_string(file_name).unwrap();
+    fn parse_file(file_name: &str) -> Result<ProjectDependencies<Self::Output>, Box<dyn Error>> {
+        let file = fs::read_to_string(file_name)?;
 
-        let raw: PackageJsonRaw = serde_json::from_str(&file).unwrap();
+        let raw: PackageJsonRaw = serde_json::from_str(&file)?;
 
-        PackageJson::from(raw)
+        Ok(PackageJson::from(raw))
     }
 }
 
