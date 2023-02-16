@@ -19,18 +19,10 @@ pub struct NpmDependency {
 
 pub type PackageJson = ProjectDependencies<NpmDependency>;
 
-/// A struct to encapsulate author name
-/// information from the NPM api
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PackageAuthor {
-    name: String,
-}
-
 /// A struct to encapsulate part of the data
 /// provided by the NPM api
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PackageData {
-    author: Option<PackageAuthor>,
     version: String,
 }
 

@@ -58,7 +58,7 @@ enum Commands {
 
 #[derive(Args, Debug)]
 struct NpmArgs {
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     include_dev_dependencies: bool,
 
     file: Option<PathBuf>,
