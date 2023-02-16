@@ -4,6 +4,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 type DirectResult<T> = Result<T, Box<dyn Error>>;
 type OptionalResult<T> = DirectResult<Option<T>>;
@@ -31,11 +32,28 @@ pub struct ProjectDependencies<T: Dependency> {
     dev_dependencies: Vec<T>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionMismatch {
     name: String,
     constraint: String,
     version: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Mismatches {
+    pub dependencies: Vec<VersionMismatch>,
+    pub dev_dependencies: Vec<VersionMismatch>,
+}
+
+impl Mismatches {
+    pub fn concat(mut self) -> Vec<VersionMismatch> {
+        let mut all = Vec::with_capacity(self.dependencies.len() + self.dev_dependencies.len());
+
+        all.append(&mut self.dependencies);
+        all.append(&mut self.dev_dependencies);
+
+        all
+    }
 }
 
 impl VersionMismatch {

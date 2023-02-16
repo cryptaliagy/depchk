@@ -5,7 +5,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use depchk::npm::PackageJson;
-use depchk::{DependencyFileParser, DependencyMismatchResult, VersionMismatch};
+use depchk::*;
 
 use reqwest::Client;
 
@@ -23,9 +23,11 @@ enum Commands {
 enum OutputTypes {
     Table,
     Json,
+    Yaml,
+    Csv,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct DependencyCheckErrors {
     errors: Vec<Box<dyn Error>>,
     msg: String,
@@ -47,9 +49,15 @@ struct NpmArgs {
 
     /// Path to the `package.json` file. If not given, assumes that it is in the current directory
     file: Option<PathBuf>,
-    // TODO: Add support for multiple outputs
-    // #[arg(value_enum, short, long)]
-    // output: OutputTypes,
+
+    #[arg(value_enum, short, long)]
+    output: Option<OutputTypes>,
+}
+
+impl Default for OutputTypes {
+    fn default() -> Self {
+        OutputTypes::Table
+    }
 }
 
 impl DependencyCheckErrors {
@@ -90,12 +98,16 @@ fn handle_dependency_result(
     (mismatches, DependencyCheckErrors::new(errs))
 }
 
-fn print_mismatches(mismatches: &[VersionMismatch]) {
+fn print_mismatches(mismatches: Mismatches) {
     let mut table = Table::new();
 
     table.set_titles(row![b->"Package Name", b->"Version Constraint", b->"Latest Version"]);
 
-    for mismatch in mismatches {
+    let mut all_mismatches = mismatches.concat();
+
+    all_mismatches.sort_by(|a, b| a.name().cmp(b.name()));
+
+    for mismatch in all_mismatches {
         let (name, constraint, version) = mismatch.destruct();
 
         table.add_row(row![FG->name, FB->constraint, FR->version]);
@@ -104,37 +116,62 @@ fn print_mismatches(mismatches: &[VersionMismatch]) {
     table.printstd();
 }
 
-async fn check_npm(path: PathBuf, include_dev_dependencies: bool) -> Result<(), Box<dyn Error>> {
-    let package_json = path.to_str().unwrap();
+fn print_csv_mismatches(mismatches: &Mismatches) {
+    for mismatch in &mismatches.dependencies {
+        let (name, constraint, version) = mismatch.destruct();
 
-    let dependencies = PackageJson::parse_file(package_json)?;
+        println!("{},{},{}", name, constraint, version);
+    }
+
+    for mismatch in &mismatches.dev_dependencies {
+        let (name, constraint, version) = mismatch.destruct();
+
+        println!("{},{},{}", name, constraint, version);
+    }
+}
+
+async fn to_mismatches<T: Dependency>(
+    dependencies: ProjectDependencies<T>,
+    include_dev_dependencies: bool,
+) -> Result<(Mismatches, DependencyCheckErrors), Box<dyn Error>> {
     let client = Client::builder().build()?;
-
     let (mismatches, mut err) =
         handle_dependency_result(dependencies.check_dependencies(&client).await);
 
-    if !mismatches.is_empty() {
-        println!("Found version updates available in dependencies:");
-        print_mismatches(&mismatches);
-    }
-
-    if !include_dev_dependencies {
-        if !err.errors.is_empty() {
-            return Err(Box::new(err));
+    let (dev_mismatches, dev_err) = {
+        if include_dev_dependencies {
+            handle_dependency_result(dependencies.check_dependencies(&client).await)
+        } else {
+            (Vec::new(), DependencyCheckErrors::default())
         }
+    };
 
-        return Ok(());
-    }
-
-    let (mismatches, dev_err) =
-        handle_dependency_result(dependencies.check_dev_dependencies(&client).await);
-
-    if !mismatches.is_empty() {
-        println!("Found version updates available in dev dependencies:");
-        print_mismatches(&mismatches);
-    }
+    let all_mismatches = Mismatches {
+        dependencies: mismatches,
+        dev_dependencies: dev_mismatches,
+    };
 
     err.join(dev_err);
+
+    Ok((all_mismatches, err))
+}
+
+async fn check_npm(
+    path: PathBuf,
+    include_dev_dependencies: bool,
+    output_type: OutputTypes,
+) -> Result<(), Box<dyn Error>> {
+    let package_json = path.to_str().unwrap();
+
+    let dependencies = PackageJson::parse_file(package_json)?;
+    let (mismatches, err) = to_mismatches(dependencies, include_dev_dependencies).await?;
+
+    match output_type {
+        OutputTypes::Table => print_mismatches(mismatches),
+        OutputTypes::Json => println!("{}", serde_json::to_string(&mismatches)?),
+        OutputTypes::Yaml => println!("{}", serde_yaml::to_string(&mismatches)?),
+        OutputTypes::Csv => print_csv_mismatches(&mismatches),
+    }
 
     if !err.errors.is_empty() {
         return Err(Box::new(err));
@@ -155,6 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             check_npm(
                 args.file.unwrap_or_else(|| PathBuf::from("package.json")),
                 args.dev,
+                args.output.unwrap_or_default(),
             )
             .await
         }
