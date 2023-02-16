@@ -21,7 +21,6 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-          target: x86_64-unknown-linux-musl
 
       - name: Lint the code
         uses: actions-rs/cargo@v1

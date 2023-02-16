@@ -1,14 +1,24 @@
 [package]
 name = "depchk"
+author = "Natalia Maximo <iam@natalia.dev>"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1.64"
 clap = { version = "4.1.4", features = ["derive"] }
 node-semver = "2.1.0"
 reqwest = { version = "0.11.14", features = ["json"] }
 serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.93"
-tokio = { version = "1.25.0", features = ["full"] }
+tokio = { version = "1.25.0", features = ["full"]}
+
+[lib]
+name = "depchk"
+path = "src/lib.rs"
+
+[[bin]]
+name = "depchk"
+path = "src/main.rs"

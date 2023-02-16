@@ -1,32 +1,42 @@
-use crate::Satisfied;
-use crate::{Dependency, DependencyHolder};
+use crate::{
+    Dependency, DependencyCheckResult, DependencyFileParser, ProjectDependencies, VersionMismatch,
+};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 
+use async_trait::async_trait;
 use node_semver::{Range, Version};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-impl Satisfied for Range {
-    fn is_satisfied_by(&self, version: &str) -> bool {
-        let parsed: Version = version.parse().unwrap();
-        self.satisfies(&parsed)
-    }
+/// A struct representing an npm package dependency from a
+/// package.json file.
+pub struct NpmDependency {
+    version: Range,
+    name: String,
+    api_url: String,
 }
 
-pub type NpmDependency = Dependency<Range>;
-pub type PackageJson = DependencyHolder<Range>;
+pub type PackageJson = ProjectDependencies<NpmDependency>;
 
+/// A struct to encapsulate author name
+/// information from the NPM api
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PackageAuthor {
     name: String,
 }
 
+/// A struct to encapsulate part of the data
+/// provided by the NPM api
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PackageData {
-    author: PackageAuthor,
-    version: Version,
+    author: Option<PackageAuthor>,
+    version: String,
 }
 
+/// A struct used to deserialize a package.json
+/// file into a format that can be more easily
+/// processed into the appropriate dependency.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageJsonRaw {
@@ -40,7 +50,7 @@ impl NpmDependency {
     ///
     /// ```
     /// # use depchk::npm::NpmDependency;
-    /// # use depchk::Satisfied;
+    /// # use depchk::Dependency;
     ///
     /// let dependency = NpmDependency::new("axios", "^0.12");
     ///
@@ -66,7 +76,11 @@ impl NpmDependency {
     pub fn try_new(name: &str, version: &str) -> Option<Self> {
         let parsed: Range = version.parse().ok()?;
 
-        Some(NpmDependency::create(name, parsed))
+        Some(NpmDependency {
+            name: name.to_string(),
+            version: parsed,
+            api_url: format!("https://registry.npmjs.org/{}/latest", name),
+        })
     }
 
     /// Creates a vector of `Dependency` instances from a given hashmap.
@@ -90,6 +104,34 @@ impl NpmDependency {
     }
 }
 
+#[async_trait]
+impl Dependency for NpmDependency {
+    async fn check_version(&self, client: &Client) -> DependencyCheckResult {
+        let res = client.get(&self.api_url).send().await?;
+        let package_data: PackageData = res.json().await?;
+
+        if self.is_satisfied_by(&package_data.version) {
+            return Ok(None);
+        }
+
+        Ok(Some(VersionMismatch {
+            name: self.name.clone(),
+            constraint: self.version.to_string(),
+            version: package_data.version,
+        }))
+    }
+
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_satisfied_by(&self, version: &str) -> bool {
+        let parsed: Version = version.parse().unwrap();
+
+        self.version.satisfies(&parsed)
+    }
+}
+
 impl From<PackageJsonRaw> for PackageJson {
     fn from(value: PackageJsonRaw) -> Self {
         PackageJson::new(
@@ -99,19 +141,15 @@ impl From<PackageJsonRaw> for PackageJson {
     }
 }
 
-impl From<String> for PackageJson {
-    fn from(value: String) -> Self {
-        let raw: PackageJsonRaw = serde_json::from_str(&value).unwrap();
+impl DependencyFileParser for PackageJson {
+    type Output = NpmDependency;
+
+    fn parse_file(file_name: &str) -> ProjectDependencies<Self::Output> {
+        let file = fs::read_to_string(file_name).unwrap();
+
+        let raw: PackageJsonRaw = serde_json::from_str(&file).unwrap();
 
         PackageJson::from(raw)
-    }
-}
-
-impl From<&str> for PackageJson {
-    fn from(file_name: &str) -> Self {
-        let contents = std::fs::read_to_string(file_name).unwrap();
-
-        PackageJson::from(contents)
     }
 }
 
