@@ -98,16 +98,20 @@ fn handle_dependency_result(
     (mismatches, DependencyCheckErrors::new(errs))
 }
 
-fn print_mismatches(mismatches: Mismatches) {
+fn print_mismatches(mismatches: &Mismatches) {
     let mut table = Table::new();
 
     table.set_titles(row![b->"Package Name", b->"Version Constraint", b->"Latest Version"]);
 
-    let mut all_mismatches = mismatches.concat();
+    for mismatch in &mismatches.dependencies {
+        let (name, constraint, version) = mismatch.destruct();
 
-    all_mismatches.sort_by(|a, b| a.name().cmp(b.name()));
+        table.add_row(row![FG->name, FB->constraint, FR->version]);
+    }
 
-    for mismatch in all_mismatches {
+    table.add_row(row![bH3->"Dev Dependencies"]);
+
+    for mismatch in &mismatches.dev_dependencies {
         let (name, constraint, version) = mismatch.destruct();
 
         table.add_row(row![FG->name, FB->constraint, FR->version]);
@@ -140,7 +144,7 @@ async fn to_mismatches<T: Dependency>(
 
     let (dev_mismatches, dev_err) = {
         if include_dev_dependencies {
-            handle_dependency_result(dependencies.check_dependencies(&client).await)
+            handle_dependency_result(dependencies.check_dev_dependencies(&client).await)
         } else {
             (Vec::new(), DependencyCheckErrors::default())
         }
@@ -167,7 +171,7 @@ async fn check_npm(
     let (mismatches, err) = to_mismatches(dependencies, include_dev_dependencies).await?;
 
     match output_type {
-        OutputTypes::Table => print_mismatches(mismatches),
+        OutputTypes::Table => print_mismatches(&mismatches),
         OutputTypes::Json => println!("{}", serde_json::to_string(&mismatches)?),
         OutputTypes::Yaml => println!("{}", serde_yaml::to_string(&mismatches)?),
         OutputTypes::Csv => print_csv_mismatches(&mismatches),
