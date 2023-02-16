@@ -81,7 +81,7 @@ fn print_mismatches(mismatches: &[VersionMismatch]) {
 
         println!(
             "\tPackage '{}' has latest version {} which is not satisfied by {}",
-            name, constraint, version,
+            name, version, constraint,
         );
     }
 }
