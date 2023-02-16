@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// package.json file.
 pub struct NpmDependency {
     version: Range,
+    raw_version: String,
     name: String,
     api_url: String,
 }
@@ -71,6 +72,7 @@ impl NpmDependency {
 
         Some(NpmDependency {
             name: name.to_string(),
+            raw_version: version.to_string(),
             version: parsed,
             api_url: format!("https://registry.npmjs.org/{}/latest", name),
         })
@@ -109,7 +111,7 @@ impl Dependency for NpmDependency {
 
         Ok(Some(VersionMismatch {
             name: self.name.clone(),
-            constraint: self.version.to_string(),
+            constraint: self.raw_version.clone(),
             version: package_data.version,
         }))
     }
