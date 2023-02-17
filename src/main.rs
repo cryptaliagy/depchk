@@ -98,7 +98,7 @@ fn handle_dependency_result(
     (mismatches, DependencyCheckErrors::new(errs))
 }
 
-fn print_mismatches(mismatches: &Mismatches) {
+fn print_table_mismatches(mismatches: &Mismatches) {
     let mut table = Table::new();
 
     table.set_titles(row![b->"Package Name", b->"Version Constraint", b->"Latest Version"]);
@@ -109,12 +109,14 @@ fn print_mismatches(mismatches: &Mismatches) {
         table.add_row(row![FG->name, FB->constraint, FR->version]);
     }
 
-    table.add_row(row![bH3->"Dev Dependencies"]);
+    if mismatches.dev_dependencies.is_some() {
+        table.add_row(row![bH3->"Dev Dependencies"]);
 
-    for mismatch in &mismatches.dev_dependencies {
-        let (name, constraint, version) = mismatch.destruct();
+        for mismatch in mismatches.dev_dependencies.as_ref().unwrap() {
+            let (name, constraint, version) = mismatch.destruct();
 
-        table.add_row(row![FG->name, FB->constraint, FR->version]);
+            table.add_row(row![FG->name, FB->constraint, FR->version]);
+        }
     }
 
     table.printstd();
@@ -127,7 +129,10 @@ fn print_csv_mismatches(mismatches: &Mismatches) {
         println!("{},{},{}", name, constraint, version);
     }
 
-    for mismatch in &mismatches.dev_dependencies {
+    if mismatches.dev_dependencies.is_none() {
+        return;
+    }
+    for mismatch in mismatches.dev_dependencies.as_ref().unwrap() {
         let (name, constraint, version) = mismatch.destruct();
 
         println!("{},{},{}", name, constraint, version);
@@ -144,9 +149,11 @@ async fn to_mismatches<T: Dependency>(
 
     let (dev_mismatches, dev_err) = {
         if include_dev_dependencies {
-            handle_dependency_result(dependencies.check_dev_dependencies(&client).await)
+            let (mismatch, err) =
+                handle_dependency_result(dependencies.check_dev_dependencies(&client).await);
+            (Some(mismatch), err)
         } else {
-            (Vec::new(), DependencyCheckErrors::default())
+            (None, DependencyCheckErrors::default())
         }
     };
 
@@ -171,7 +178,7 @@ async fn check_npm(
     let (mismatches, err) = to_mismatches(dependencies, include_dev_dependencies).await?;
 
     match output_type {
-        OutputTypes::Table => print_mismatches(&mismatches),
+        OutputTypes::Table => print_table_mismatches(&mismatches),
         OutputTypes::Json => println!("{}", serde_json::to_string(&mismatches)?),
         OutputTypes::Yaml => println!("{}", serde_yaml::to_string(&mismatches)?),
         OutputTypes::Csv => print_csv_mismatches(&mismatches),

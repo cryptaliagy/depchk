@@ -42,18 +42,9 @@ pub struct VersionMismatch {
 #[derive(Serialize, Deserialize)]
 pub struct Mismatches {
     pub dependencies: Vec<VersionMismatch>,
-    pub dev_dependencies: Vec<VersionMismatch>,
-}
 
-impl Mismatches {
-    pub fn concat(mut self) -> Vec<VersionMismatch> {
-        let mut all = Vec::with_capacity(self.dependencies.len() + self.dev_dependencies.len());
-
-        all.append(&mut self.dependencies);
-        all.append(&mut self.dev_dependencies);
-
-        all
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_dependencies: Option<Vec<VersionMismatch>>,
 }
 
 impl VersionMismatch {
@@ -90,12 +81,14 @@ pub async fn check_dependencies<T: Dependency>(
     let mut handlers = Vec::with_capacity(dependencies.len());
 
     for dependency in dependencies {
-        handlers.push(dependency.check_version(client).await);
+        handlers.push(dependency.check_version(client));
     }
 
-    let mut results = Vec::with_capacity(handlers.len());
+    let joined = futures::future::join_all(handlers).await;
 
-    for result in handlers {
+    let mut results = Vec::with_capacity(joined.len());
+
+    for result in joined {
         if result.is_err() || result.as_ref().unwrap().is_some() {
             results.push(result.map(|mismatch| mismatch.unwrap()))
         }
