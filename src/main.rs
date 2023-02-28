@@ -9,15 +9,9 @@ use depchk::*;
 
 use reqwest::Client;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, ValueEnum};
 
 use prettytable::Table;
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Checks a given package.json file for dependency update availability
-    Npm(NpmArgs),
-}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum OutputTypes {
@@ -25,6 +19,11 @@ enum OutputTypes {
     Json,
     Yaml,
     Csv,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum DependencyType {
+    Npm,
 }
 
 #[derive(Debug, Default)]
@@ -37,19 +36,19 @@ struct DependencyCheckErrors {
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Args, Debug, Default)]
-struct NpmArgs {
     /// If true, also checks the dev dependencies for updates
     #[arg(short, long)]
     dev: bool,
 
-    /// Path to the `package.json` file. If not given, assumes that it is in the current directory
+    /// What type of dependency is being parsed
+    dependency: DependencyType,
+
+    /// Path to the dependency file. If not given, assumes that it is in the current directory.
+    /// The actual default is determined by the dependency type. For example, for the npm dependency type,
+    /// the default is "package.json"
     file: Option<PathBuf>,
 
+    /// The display type of the output
     #[arg(value_enum, short, long)]
     output: Option<OutputTypes>,
 }
@@ -167,14 +166,18 @@ async fn to_mismatches<T: Dependency>(
     Ok((all_mismatches, err))
 }
 
-async fn check_npm(
+async fn depchk(
     path: PathBuf,
     include_dev_dependencies: bool,
+    dependency_type: DependencyType,
     output_type: OutputTypes,
 ) -> Result<(), Box<dyn Error>> {
     let package_json = path.to_str().unwrap();
 
-    let dependencies = PackageJson::parse_file(package_json)?;
+    let dependencies = match dependency_type {
+        DependencyType::Npm => PackageJson::parse_file(package_json)?,
+    };
+
     let (mismatches, err) = to_mismatches(dependencies, include_dev_dependencies).await?;
 
     match output_type {
@@ -191,23 +194,24 @@ async fn check_npm(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    let result = match cli
-        .command
-        .unwrap_or_else(|| Commands::Npm(NpmArgs::default()))
-    {
-        Commands::Npm(args) => {
-            check_npm(
-                args.file.unwrap_or_else(|| PathBuf::from("package.json")),
-                args.dev,
-                args.output.unwrap_or_default(),
-            )
-            .await
-        }
+    let file = match cli.dependency {
+        DependencyType::Npm => cli.file.unwrap_or_else(|| PathBuf::from("package.json")),
     };
+
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()
+        .expect("Could not build async runtime")
+        .block_on(depchk(
+            file,
+            cli.dev,
+            cli.dependency,
+            cli.output.unwrap_or_default(),
+        ));
 
     result
 }
